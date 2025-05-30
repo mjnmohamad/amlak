@@ -3,7 +3,8 @@ uvicorn[standard]
 python-dotenv
 sqlalchemy
 pymysql
-pinecone-client
+
+pinecone
 
 openai
 
@@ -13,3 +14,4 @@ langchain-openai
 pandas
 
 tiktoken
+
