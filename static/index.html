@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -95,10 +94,15 @@
 
     async function sendChat(prompt) {
       try {
+        // ترکیب prompt و فیلترها به صورت مستقیم
+        const body = {
+          prompt,
+          ...currentFilters()
+        };
         const res = await fetch(`${API_BASE}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, filters: currentFilters() }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
         appendMessage('assistant', data.reply || 'پاسخی دریافت نشد.');
