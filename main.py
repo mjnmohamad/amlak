@@ -1,4 +1,4 @@
-main.py ────────────────────────────────────────────────────────────────
+# main.py
 import os
 from typing import Optional, List
 
@@ -7,25 +7,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ── لایه‌های داخلی --------------------------------------------------------- #
-from config          import listings_collection, vector_store
-from search_service  import SearchService
+# لایه‌های داخلی
+from config import listings_collection, vector_store
+from search_service import SearchService
 from search_semantic import SemanticSearch
-from agent_manager   import run_agent_with_filters
+from agent_manager import run_agent_with_filters
 
-# ─────────────────── مقداردهی سراسری ───────────────────────────────────────
+# ---------- مقداردهی اصلی اپ ----------
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-# ۱) اگر پوشه‌ی static وجود ندارد، بسازیم
+# پوشه static (برای index.html ساده)
 os.makedirs("static", exist_ok=True)
 
-# ۲) مقداردهی Semantic Layer
-semantic_layer  = SemanticSearch(vector_store)
+# لایه معنایی و سرویس جست‌وجو
+semantic_layer = SemanticSearch(vector_store)
+search_service = SearchService(listings_collection, vector_store, semantic_layer)
 
-# ۳) ساخت SearchService
-search_service  = SearchService(listings_collection, vector_store, semantic_layer)
-
-# (اختیاری) CORS برای فرانت
+# CORS برای فرانت
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,40 +31,39 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─────────────────── مدل‌های ورودی/خروجی ───────────────────────────────────
+# ---------- مدل‌های ورودی/خروجی ----------
 class ChatRequest(BaseModel):
-    prompt:       Optional[str] = None
+    prompt: Optional[str] = None
     neighborhood: Optional[str] = None
-    max_price:    Optional[float] = None
-    min_sqft:     Optional[float] = None
+    max_price: Optional[float] = None
+    min_sqft: Optional[float] = None
 
 class ChatResponse(BaseModel):
     reply: str
 
 class SearchRequest(BaseModel):
     neighborhood: Optional[str] = None
-    max_price:    Optional[float] = None
-    min_sqft:     Optional[float] = None
+    max_price: Optional[float] = None
+    min_sqft: Optional[float] = None
 
-# ─────────────────── اندپوینت‌ها ────────────────────────────────────────────
+# ---------- اندپوینت‌ها ----------
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(body: ChatRequest):
     raw = await run_agent_with_filters(
-        neighborhood = body.neighborhood,
-        max_price    = body.max_price,
-        min_sqft     = body.min_sqft,
-        text         = body.prompt,
+        neighborhood=body.neighborhood,
+        max_price=body.max_price,
+        min_sqft=body.min_sqft,
+        text=body.prompt,
     )
-    # اگر هنوز dict بود:
     reply_text = raw["output"] if isinstance(raw, dict) else raw
-    return {"reply": reply_text} 
+    return {"reply": reply_text}
 
 @app.post("/api/search", summary="جست‌وجوی ساختاری آگهی‌ها")
 async def search_endpoint(body: SearchRequest) -> List[dict]:
     listings = search_service.structured_search(
-        neighborhood = body.neighborhood,
-        max_price    = body.max_price,
-        min_sqft     = body.min_sqft,
+        neighborhood=body.neighborhood,
+        max_price=body.max_price,
+        min_sqft=body.min_sqft,
     )
     return listings
 
@@ -74,12 +71,13 @@ async def search_endpoint(body: SearchRequest) -> List[dict]:
 async def health():
     return {"status": "ok"}
 
-# ───────────── سرو کردن فایل index.html در ریشهٔ سایت ───────────────────────
+# ---------- سرو فایل‌های استاتیک ----------
 app.mount(
-    "/",                                   # http://<host>/
+    "/",  # http://<host>/
     StaticFiles(directory="static", html=True),
     name="static",
 )
+
 
 
 
