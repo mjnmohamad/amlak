@@ -1,4 +1,3 @@
-
 import os
 from typing import Optional, List, Dict
 
@@ -12,7 +11,7 @@ from pydantic import BaseModel, Field
 from config          import listings_collection, vector_store
 from search_service  import SearchService
 from search_semantic import SemanticSearch
-from agent_manager   import run_agent
+from agent_manager   import run_agent_with_filters
 
 # ─────────────────── مقداردهی اپلیکیشن ────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
@@ -39,7 +38,7 @@ search_service = SearchService(listings_collection, vector_store, semantic_layer
 
 # ── مدل‌های ورودی/خروجی ──────────────────────────────────────────────────
 class ChatRequest(BaseModel):
-    prompt:       Optional[str] = Field(None, description="متن پرسش آزاد")
+    prompt:       Optional[str] = Field(None, description="متن پرسش آزاد یا سوال follow-up")
     neighborhood: Optional[str] = Field(None, description="فیلتر محله")
     max_price:    Optional[float] = Field(None, description="سقف قیمت")
     min_sqft:     Optional[float] = Field(None, description="حداقل مساحت")
@@ -56,39 +55,47 @@ class SearchRequest(BaseModel):
 @app.post(
     "/api/chat",
     response_model=ChatResponse,
-    summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس شما و سوالات follow-up)"
+    summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس و Follow-up)"
 )
 async def chat_endpoint(req: ChatRequest):
     try:
-        # ابتدا فیلترهای ساختاری را بدون پرسش انجام می‌دهیم
+        # ۱) جستجوی ساختاری با فیلترها
         props = search_service.structured_search(
             neighborhood=req.neighborhood,
             max_price=req.max_price,
             min_sqft=req.min_sqft,
             limit=10
         )
-        # تهیه خلاصه‌ای از املاک پیدا شده
-        summary_list = []
-        for p in props:
-            summary_list.append(
+        # ۲) ساخت خلاصه نتایج
+        if props:
+            summary_lines = [
                 f"{p['address']} in {p['neighborhood']} for ${p['sale_price']} ({p['gross_square_feet']} sqft)"
-            )
-        summary_text = "\n".join(summary_list) if summary_list else "هیچ ملکی مطابق فیلترها یافت نشد."
+                for p in props
+            ]
+            summary_text = "\n".join(summary_lines)
+        else:
+            summary_text = "هیچ ملکی مطابق فیلترها یافت نشد."
 
-        # اگر کاربر فقط سوال فیلتر داشت و prompt خالی بود
+        # ۳) اگر فقط فیلترها اعمال شده بخواهند
         if not req.prompt:
             return ChatResponse(reply=summary_text)
 
-        # اگر prompt وجود دارد، context را با نتایج جستجو ترکیب می‌کنیم
-        combined_prompt = (
+        # ۴) پرسش follow-up ترکیب‌شده
+        combined_text = (
             "املاک زیر با فیلترهای شما یافت شد:\n"
             f"{summary_text}\n\n"
-            "حالا به سوال زیر پاسخ بده:\n"
-            f"{req.prompt}"
+            "سوال شما: " + req.prompt
         )
-        # فراخوان Agent با متن ترکیبی
-        answer = await run_agent(combined_prompt)
+
+        # ۵) فراخوانی Agent با فیلترها و متن ترکیبی
+        answer = await run_agent_with_filters(
+            neighborhood=req.neighborhood,
+            max_price=req.max_price,
+            min_sqft=req.min_sqft,
+            text=combined_text,
+        )
         return ChatResponse(reply=answer)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -98,11 +105,15 @@ async def chat_endpoint(req: ChatRequest):
     summary="جستجوی ساختاری مستقیم در MongoDB"
 )
 async def search_endpoint(req: SearchRequest):
-    return search_service.structured_search(
-        neighborhood=req.neighborhood,
-        max_price=req.max_price,
-        min_sqft=req.min_sqft
-    )
+    try:
+        results = search_service.structured_search(
+            neighborhood=req.neighborhood,
+            max_price=req.max_price,
+            min_sqft=req.min_sqft
+        )
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health", summary="Health-check")
 async def health():
