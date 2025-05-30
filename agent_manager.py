@@ -1,40 +1,35 @@
 
 
-# ─── agent_manager.py ────────────────────────────────────────────────────────
-"""
-Singleton-های سراسری برنامه: SearchService، SemanticSearch، LLM (OpenRouter) و Agent.
-"""
-
 from __future__ import annotations
 import json
 import asyncio
-from typing import Optional
+from typing import Optional, Any
 
-# ── لایه‌های داخلی --------------------------------------------------------- #
 from config import Session, vector_store
-from search_service  import SearchService
+from search_service import SearchService
 from search_semantic import SemanticSearch
-# from models          import Model as ORModel
 from models import Model, MODELS
-# ── LangChain ----------------------------------------------------------------
+
 from langchain.llms.base import LLM
-from langchain.agents    import initialize_agent, AgentType
-from langchain.tools     import Tool
+from langchain.agents import initialize_agent, AgentType
+from langchain.tools import Tool
 
 # ───────────────── ۱) سرویس‌های جست‌وجو ─────────────────────────────────────
-semantic_layer  = SemanticSearch(vector_store)
-search_service  = SearchService(Session, vector_store, semantic_layer)
+semantic_layer = SemanticSearch(vector_store)
+search_service = SearchService(Session, vector_store, semantic_layer)
 
 # ───────────────── ۲) رَپِر LLM برای LangChain ──────────────────────────────
 class OpenRouterLangChain(LLM):
     model_name: str = MODELS
 
     @property
-    def _llm_type(self) -> str:            # الزام LangChain
+    def _llm_type(self) -> str:
         return "openrouter"
 
-    def _call(self, prompt: str, stop: Optional[list[str]] = None) -> str:
-        # LangChain یک تابع سینک می‌خواهد؛ مدل ما async است.
+    def _call(self, prompt: str, stop: Optional[list[str]] = None, **kwargs: Any) -> str:
+        """
+        متد _call باید **kwargs رو هم بپذیرد تا ارور functions مربوط به agent حل شود.
+        """
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(
@@ -43,33 +38,33 @@ class OpenRouterLangChain(LLM):
         finally:
             loop.close()
 
-llm = OpenRouterLangChain()                # شیء مشترک
+llm = OpenRouterLangChain()
 
 # ───────────────── ۳) ابزارها ───────────────────────────────────────────────
 structured_tool = Tool(
-    name        = "structured_search",
-    func        = search_service.structured_search,
-    description = "Structured SQL search with filters: neighborhood, max_price, min_sqft"
+    name="structured_search",
+    func=search_service.structured_search,
+    description="Structured SQL search with filters: neighborhood, max_price, min_sqft",
 )
 
 semantic_tool = Tool(
-    name        = "semantic_search",
-    func        = search_service.semantic_search,
-    description = "Semantic similarity search over listing descriptions"
+    name="semantic_search",
+    func=search_service.semantic_search,
+    description="Semantic similarity search over listing descriptions",
 )
 
 # ───────────────── ۴) Agent ────────────────────────────────────────────────
 agent = initialize_agent(
-    tools   = [structured_tool, semantic_tool],
-    llm     = llm,
-    agent   = AgentType.OPENAI_FUNCTIONS,
-    verbose = False,
+    tools=[structured_tool, semantic_tool],
+    llm=llm,
+    agent=AgentType.OPENAI_FUNCTIONS,
+    verbose=False,
 )
 
 # ───────────────── ۵) توابع کمکی ────────────────────────────────────────────
 def run_agent(prompt: str) -> str:
-    """اجرای مستقیم Agent با یک پرامپت متنی."""
-    return agent.run(prompt)
+    # به جای run از invoke استفاده می‌کنیم (بدون deprecated warning)
+    return agent.invoke(prompt)
 
 def run_agent_with_filters(
     neighborhood: str | None = None,
@@ -77,17 +72,15 @@ def run_agent_with_filters(
     min_sqft:     float | None = None,
     text:         str | None = None,
 ) -> str:
-    """
-    اگر `text` داده شود، همان به‌عنوان پرامپت استفاده می‌شود؛
-    وگرنه فیلترها در قالب JSON به Agent پاس داده می‌شوند.
-    """
     payload = {
         "neighborhood": neighborhood,
         "max_price":    max_price,
         "min_sqft":     min_sqft,
     }
     prompt = text or json.dumps(payload, ensure_ascii=False)
-    return agent.run(prompt)
+    return agent.invoke(prompt)
+
+
 
 
 
