@@ -67,6 +67,15 @@ async def search_endpoint(body: SearchRequest) -> List[dict]:
     )
     return listings
 
+
+@app.get("/api/debug", include_in_schema=False, summary="Debug MongoDB")
+async def debug_mongo():
+    total = listings_collection.count_documents({})
+    sample = listings_collection.find_one()
+    # فقط کلیدها را به عنوان لیست برمی‌گردانیم
+    keys = list(sample.keys()) if sample else []
+    return {"total_docs": total, "sample_keys": keys}
+    
 @app.get("/health", summary="Health-check")
 async def health():
     return {"status": "ok"}
