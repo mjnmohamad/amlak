@@ -11,7 +11,7 @@ import asyncio
 from typing import Optional
 
 # ── لایه‌های داخلی --------------------------------------------------------- #
-from config import Session, vector_store, MODEL_TYPE
+from config import Session, vector_store
 from search_service  import SearchService
 from search_semantic import SemanticSearch
 # from models          import Model as ORModel
