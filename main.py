@@ -16,7 +16,7 @@ from agent_manager   import run_agent_with_filters
 # ─────────────────── مقداردهی اپلیکیشن ────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-# CORS (در صورت استفاده از فرانت جدا)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── سرو کردن static ───────────────────────────────────────────────────────
+# سرو کردن فایل‌های static
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -32,7 +32,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def serve_index():
     return FileResponse("static/index.html")
 
-# ── مقداردهی سرویس‌های دیتابیس و وکتور ────────────────────────────────────
+# ── سرویس‌های دیتابیس و وکتور ───────────────────────────────────────────
 semantic_layer = SemanticSearch(vector_store)
 search_service = SearchService(listings_collection, vector_store, semantic_layer)
 
@@ -59,35 +59,40 @@ class SearchRequest(BaseModel):
 )
 async def chat_endpoint(req: ChatRequest):
     try:
-        # ۱) جستجوی ساختاری با فیلترها
+        # 1) جستجوی ساختاری با فیلترها
         props = search_service.structured_search(
             neighborhood=req.neighborhood,
             max_price=req.max_price,
             min_sqft=req.min_sqft,
             limit=10
         )
-        # ۲) ساخت خلاصه نتایج
+        # 2) ساخت خلاصه نتایج با دسترسی امن به کلیدها
         if props:
-            summary_lines = [
-                f"{p['address']} in {p['neighborhood']} for ${p['sale_price']} ({p['gross_square_feet']} sqft)"
-                for p in props
-            ]
+            summary_lines = []
+            for p in props:
+                addr = p.get('address', 'Unknown address')
+                neigh = p.get('neighborhood', 'Unknown')
+                price = p.get('sale_price', 0)
+                sqft = p.get('gross_square_feet', 0)
+                summary_lines.append(
+                    f"{addr} in {neigh} for ${price} ({sqft} sqft)"
+                )
             summary_text = "\n".join(summary_lines)
         else:
             summary_text = "هیچ ملکی مطابق فیلترها یافت نشد."
 
-        # ۳) اگر فقط فیلترها اعمال شده بخواهند
+        # 3) اگر فقط فیلترها اعمال شده و بدون prompt باشند
         if not req.prompt:
             return ChatResponse(reply=summary_text)
 
-        # ۴) پرسش follow-up ترکیب‌شده
+        # 4) پرسش follow-up ترکیب‌شده
         combined_text = (
             "املاک زیر با فیلترهای شما یافت شد:\n"
             f"{summary_text}\n\n"
             "سوال شما: " + req.prompt
         )
 
-        # ۵) فراخوانی Agent با فیلترها و متن ترکیبی
+        # 5) فراخوانی Agent با فیلترها و متن ترکیبی
         answer = await run_agent_with_filters(
             neighborhood=req.neighborhood,
             max_price=req.max_price,
@@ -97,7 +102,9 @@ async def chat_endpoint(req: ChatRequest):
         return ChatResponse(reply=answer)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # لاگ خطا
+        import logging; logging.error(f"Error in chat_endpoint: {e}")
+        raise HTTPException(status_code=500, detail="خطا در پردازش درخواست چت")
 
 @app.post(
     "/api/search",
@@ -113,7 +120,8 @@ async def search_endpoint(req: SearchRequest):
         )
         return results
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging; logging.error(f"Error in search_endpoint: {e}")
+        raise HTTPException(status_code=500, detail="خطا در جستجوی املاک")
 
 @app.get("/health", summary="Health-check")
 async def health():
