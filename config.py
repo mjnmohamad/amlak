@@ -1,16 +1,20 @@
 
+
+
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import pinecone
+# ── Pinecone SDK v5+ ────────────────────────────────────────────────────────
+from pinecone import Pinecone
+
+# ── LangChain & Embeddings ─────────────────────────────────────────────────
 from langchain_openai import OpenAIEmbeddings
-from langchain.vectorstores import Pinecone as PineconeVectorStore
+from langchain_community.vectorstores import Pinecone as PineconeVectorStore
 
 load_dotenv()
 
-# ── ENV Vars ───────────────────────────────────────────────────────────────
 DATABASE_URL         = os.getenv("DATABASE_URL")
 OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY     = os.getenv("PINECONE_API_KEY")
@@ -31,25 +35,26 @@ def get_db():
     finally:
         db.close()
 
-# ── Pinecone + LangChain ────────────────────────────────────────────────────
-pinecone.init(
+# ── Pinecone v5+ Client ─────────────────────────────────────────────────────
+pc = Pinecone(
     api_key=PINECONE_API_KEY,
     environment=PINECONE_ENVIRONMENT,
 )
+# واکشی host ایندکس
+desc = pc.describe_index(name=PINECONE_INDEX_NAME)
+# ایجاد handle واقعی به ایندکس
+pinecone_index = pc.Index(host=desc.host)
 
-# کلاینت واقعی از ایندکس
-pinecone_index = pinecone.Index(PINECONE_INDEX_NAME)
-
-# Embeddings
+# ── Embeddings & VectorStore ────────────────────────────────────────────────
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
-# ساخت VectorStore
 vector_store = PineconeVectorStore.from_existing_index(
     pinecone_index,
     embeddings,
     text_key="text",
-    # namespace="default",   # اگر لازم داری
+    # namespace="default",  # اگر namespace استفاده می‌کنید
 )
+
 
 
 
