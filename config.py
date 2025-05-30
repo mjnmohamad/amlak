@@ -18,6 +18,7 @@ PINECONE_API_KEY     = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
 PINECONE_INDEX_NAME  = os.getenv("PINECONE_INDEX_NAME", "listings-index")
 
+
 if not (MONGODB_URI and OPENAI_API_KEY and PINECONE_API_KEY and PINECONE_ENVIRONMENT):
     raise RuntimeError("⛔️ یکی از متغیرهای ضروری در .env تنظیم نشده است")
 
