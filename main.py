@@ -1,5 +1,3 @@
-
-
 # ─── main.py ────────────────────────────────────────────────────────────────
 from typing import Optional, List
 
@@ -11,12 +9,17 @@ from pydantic import BaseModel
 # لایه‌های داخلی
 from config import Session, vector_store
 from search_service import SearchService
+from search_semantic import SemanticSearch
 from agent_manager import run_agent, run_agent_with_filters
 
 # ─────────────────── مقداردهی سراسری ───────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-search_service = SearchService(Session, vector_store)   # فقط یک‌بار
+# ابتدا لایه‌ی معنایی را مقداردهی می‌کنیم
+semantic_layer = SemanticSearch(vector_store)
+
+# سپس SearchService را با سه پارامترِ موردنیاز می‌سازیم
+search_service = SearchService(Session, vector_store, semantic_layer)
 
 # (اختیاری) اگر از دامنه/پورت متفاوت برای کلاینت استفاده می‌کنی
 app.add_middleware(
@@ -68,6 +71,7 @@ app.mount(
     StaticFiles(directory="static", html=True),
     name="static",
 )
+
 
 # اجرا:  uvicorn main:app --reload --port 8000
 
