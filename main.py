@@ -1,23 +1,31 @@
-# main.py
+main.py ────────────────────────────────────────────────────────────────
 import os
-from typing import Optional, List, Dict
+from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-# ── لایه‌های داخلی ---------------------------------------------------------
+# ── لایه‌های داخلی --------------------------------------------------------- #
 from config          import listings_collection, vector_store
 from search_service  import SearchService
 from search_semantic import SemanticSearch
 from agent_manager   import run_agent_with_filters
 
-# ─────────────────── مقداردهی اپلیکیشن ────────────────────────────────────
+# ─────────────────── مقداردهی سراسری ───────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-# CORS (در صورت استفاده از فرانت جدا)
+# ۱) اگر پوشه‌ی static وجود ندارد، بسازیم
+os.makedirs("static", exist_ok=True)
+
+# ۲) مقداردهی Semantic Layer
+semantic_layer  = SemanticSearch(vector_store)
+
+# ۳) ساخت SearchService
+search_service  = SearchService(listings_collection, vector_store, semantic_layer)
+
+# (اختیاری) CORS برای فرانت
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,68 +33,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── سرو کردن static ───────────────────────────────────────────────────────
-os.makedirs("static", exist_ok=True)
-# فقط GET/HEAD زیر /static
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# فقط GET روی ریشه→ index.html
-@app.get("/", include_in_schema=False)
-async def serve_index():
-    return FileResponse("static/index.html")
-
-# ── مقداردهی سرویس‌های دیتابیس و وکتور ────────────────────────────────────
-semantic_layer = SemanticSearch(vector_store)
-search_service = SearchService(listings_collection, vector_store, semantic_layer)
-
-# ── مدل‌های ورودی/خروجی ──────────────────────────────────────────────────
+# ─────────────────── مدل‌های ورودی/خروجی ───────────────────────────────────
 class ChatRequest(BaseModel):
-    prompt:       Optional[str] = Field(None, description="متن پرسش آزاد")
-    neighborhood: Optional[str] = Field(None, description="فیلتر محله")
-    max_price:    Optional[float] = Field(None, description="سقف قیمت")
-    min_sqft:     Optional[float] = Field(None, description="حداقل مساحت")
+    prompt:       Optional[str] = None
+    neighborhood: Optional[str] = None
+    max_price:    Optional[float] = None
+    min_sqft:     Optional[float] = None
 
 class ChatResponse(BaseModel):
-    reply: str = Field(..., description="پاسخ مدل بر اساس دیتابیس شما")
+    reply: str
 
 class SearchRequest(BaseModel):
     neighborhood: Optional[str] = None
     max_price:    Optional[float] = None
     min_sqft:     Optional[float] = None
 
-# ── اندپوینت‌های API ─────────────────────────────────────────────────────
-@app.post(
-    "/api/chat",
-    response_model=ChatResponse,
-    summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس شما)"
-)
-async def chat_endpoint(req: ChatRequest):
-    try:
-        answer = await run_agent_with_filters(
-            neighborhood = req.neighborhood,
-            max_price    = req.max_price,
-            min_sqft     = req.min_sqft,
-            text         = req.prompt or "",
-        )
-        return ChatResponse(reply=answer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post(
-    "/api/search",
-    response_model=List[Dict],
-    summary="جستجوی ساختاری مستقیم در MongoDB"
-)
-async def search_endpoint(req: SearchRequest):
-    return search_service.structured_search(
-        neighborhood = req.neighborhood,
-        max_price    = req.max_price,
-        min_sqft     = req.min_sqft,
+# ─────────────────── اندپوینت‌ها ────────────────────────────────────────────
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat_endpoint(body: ChatRequest):
+    raw = await run_agent_with_filters(
+        neighborhood = body.neighborhood,
+        max_price    = body.max_price,
+        min_sqft     = body.min_sqft,
+        text         = body.prompt,
     )
+    # اگر هنوز dict بود:
+    reply_text = raw["output"] if isinstance(raw, dict) else raw
+    return {"reply": reply_text} 
+
+@app.post("/api/search", summary="جست‌وجوی ساختاری آگهی‌ها")
+async def search_endpoint(body: SearchRequest) -> List[dict]:
+    listings = search_service.structured_search(
+        neighborhood = body.neighborhood,
+        max_price    = body.max_price,
+        min_sqft     = body.min_sqft,
+    )
+    return listings
 
 @app.get("/health", summary="Health-check")
 async def health():
     return {"status": "ok"}
+
+# ───────────── سرو کردن فایل index.html در ریشهٔ سایت ───────────────────────
+app.mount(
+    "/",                                   # http://<host>/
+    StaticFiles(directory="static", html=True),
+    name="static",
+)
 
 
 
