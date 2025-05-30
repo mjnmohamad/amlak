@@ -10,7 +10,7 @@ openai
 
 langchain
 langchain-openai
-langchain-community
+langchain-pinecone
 
 pandas
 
