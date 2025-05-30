@@ -3,7 +3,8 @@ uvicorn[standard]
 python-dotenv
 sqlalchemy
 pymysql
-pinecone-client
+pinecone
+
 openai
 langchain
 pandas
