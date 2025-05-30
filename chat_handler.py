@@ -1,50 +1,36 @@
-
-
-
-# ─── chat_handler.py ─────────────────────────────────────────────────────────
 import os, asyncio
-from typing       import List, Dict
-from dotenv       import load_dotenv
-from sqlalchemy   import create_engine
-from sqlalchemy.orm import sessionmaker
-from models          import Model
-from search_service  import SearchService
-from config          import vector_store
+from typing import List, Dict
+from dotenv import load_dotenv
+
+from config import listings_collection, vector_store
+from search_service import SearchService
+from search_semantic import SemanticSearch
+from models import Model, MODELS
 
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-MODEL_TYPE   = os.getenv("MODEL_TYPE", "gpt-4o")
+# MODEL_TYPE = os.getenv("MODEL_TYPE", "gpt-4o")
 
-# ── Session واحد از همان Engine همه‌جا
-engine   = create_engine(DATABASE_URL)
-Session  = sessionmaker(bind=engine)
-
-search_service = SearchService(Session, vector_store)
-llm_model      = Model(model_type=MODEL_TYPE)
+search_service = SearchService(listings_collection, vector_store, SemanticSearch(vector_store))
+llm_model      = Model(model_type=MODELS)
 
 Message = Dict[str, str]
 
-# ---------------------------------------------------------------------------
 async def handle_user_message(
     user_message: str,
     filters: Dict[str, str],
     conversation_history: List[Message]
 ) -> str:
-    """جست‌وجو، ساخت کانتکست، فراخوانی LLM و برگرداندن پاسخ متن"""
-    # ۱) search
     structured = search_service.structured_search(
-        city      = filters.get("city", ""),
-        max_price = float(filters["max_price"]) if filters.get("max_price") else None,
-        min_area  = float(filters["min_area"])  if filters.get("min_area")  else None
+        neighborhood = filters.get("neighborhood"),
+        max_price    = float(filters["max_price"]) if filters.get("max_price") else None,
+        min_sqft     = float(filters["min_sqft"])  if filters.get("min_sqft")  else None
     )
-    semantic   = search_service.semantic_search(user_message)
+    semantic = search_service.semantic_search(user_message)
 
-    # ۲) کانتکست → فقط رشته‌های کوتاه
-    ctx_lines = [
-        f"{it['id']}: {it['description_snippet']}" for it in structured[:5]
-    ] + [
-        f"{it['id']}: {it['description_snippet']}" for it in semantic
-    ]
+    ctx_lines = (
+        [f"{d['id']}: {d.get('address','')}"        for d in structured[:5]] +
+        [f"{d['id']}: {d['snippet']}"               for d in semantic]
+    )
 
     prompt = (
         "You are a real-estate assistant.\n"
@@ -52,28 +38,9 @@ async def handle_user_message(
         f"\n\nUser question: {user_message}"
     )
 
-    # ۳) تاریخچه + پیام فعلی
-    messages = conversation_history.copy()
-    messages.append({"role": "user", "content": prompt})
+    messages = conversation_history + [{"role": "user", "content": prompt}]
+    return await llm_model.generate_response(prompt, conversation_history=messages)
 
-    reply = await llm_model.generate_response(
-        prompt               = prompt,
-        conversation_history = messages
-    )
-    return reply
-
-# ─── اجرای نمونه ────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    async def _demo():
-        hist: List[Message] = []
-        flt  = {"city": "تهران", "max_price": "10000000000", "min_area": "70"}
-        ans  = await handle_user_message(
-            "می‌خوام یه آپارتمان دوخوابه نزدیک مترو با نور عالی",
-            flt, hist
-        )
-        print(ans)
-
-    asyncio.run(_demo())
 
 
 
