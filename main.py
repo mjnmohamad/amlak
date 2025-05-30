@@ -1,29 +1,23 @@
-# main.py
-import os
-from typing import Optional, List
 
-from fastapi import FastAPI
+import os
+from typing import Optional, List, Dict
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
-# لایه‌های داخلی
-from config import listings_collection, vector_store
-from search_service import SearchService
+# ── لایه‌های داخلی ---------------------------------------------------------
+from config          import listings_collection, vector_store
+from search_service  import SearchService
 from search_semantic import SemanticSearch
-from agent_manager import run_agent_with_filters
+from agent_manager   import run_agent
 
-# ---------- مقداردهی اصلی اپ ----------
+# ─────────────────── مقداردهی اپلیکیشن ────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-# پوشه static (برای index.html ساده)
-os.makedirs("static", exist_ok=True)
-
-# لایه معنایی و سرویس جست‌وجو
-semantic_layer = SemanticSearch(vector_store)
-search_service = SearchService(listings_collection, vector_store, semantic_layer)
-
-# CORS برای فرانت
+# CORS (در صورت استفاده از فرانت جدا)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,61 +25,179 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------- مدل‌های ورودی/خروجی ----------
+# ── سرو کردن static ───────────────────────────────────────────────────────
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/", include_in_schema=False)
+async def serve_index():
+    return FileResponse("static/index.html")
+
+# ── مقداردهی سرویس‌های دیتابیس و وکتور ────────────────────────────────────
+semantic_layer = SemanticSearch(vector_store)
+search_service = SearchService(listings_collection, vector_store, semantic_layer)
+
+# ── مدل‌های ورودی/خروجی ──────────────────────────────────────────────────
 class ChatRequest(BaseModel):
-    prompt: Optional[str] = None
-    neighborhood: Optional[str] = None
-    max_price: Optional[float] = None
-    min_sqft: Optional[float] = None
+    prompt:       Optional[str] = Field(None, description="متن پرسش آزاد")
+    neighborhood: Optional[str] = Field(None, description="فیلتر محله")
+    max_price:    Optional[float] = Field(None, description="سقف قیمت")
+    min_sqft:     Optional[float] = Field(None, description="حداقل مساحت")
 
 class ChatResponse(BaseModel):
-    reply: str
+    reply: str = Field(..., description="پاسخ مدل بر اساس دیتابیس و سوالات شما")
 
 class SearchRequest(BaseModel):
     neighborhood: Optional[str] = None
-    max_price: Optional[float] = None
-    min_sqft: Optional[float] = None
+    max_price:    Optional[float] = None
+    min_sqft:     Optional[float] = None
 
-# ---------- اندپوینت‌ها ----------
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat_endpoint(body: ChatRequest):
-    raw = await run_agent_with_filters(
-        neighborhood=body.neighborhood,
-        max_price=body.max_price,
-        min_sqft=body.min_sqft,
-        text=body.prompt,
+# ── اندپوینت‌های API ─────────────────────────────────────────────────────
+@app.post(
+    "/api/chat",
+    response_model=ChatResponse,
+    summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس شما و سوالات follow-up)"
+)
+async def chat_endpoint(req: ChatRequest):
+    try:
+        # ابتدا فیلترهای ساختاری را بدون پرسش انجام می‌دهیم
+        props = search_service.structured_search(
+            neighborhood=req.neighborhood,
+            max_price=req.max_price,
+            min_sqft=req.min_sqft,
+            limit=10
+        )
+        # تهیه خلاصه‌ای از املاک پیدا شده
+        summary_list = []
+        for p in props:
+            summary_list.append(
+                f"{p['address']} in {p['neighborhood']} for ${p['sale_price']} ({p['gross_square_feet']} sqft)"
+            )
+        summary_text = "\n".join(summary_list) if summary_list else "هیچ ملکی مطابق فیلترها یافت نشد."
+
+        # اگر کاربر فقط سوال فیلتر داشت و prompt خالی بود
+        if not req.prompt:
+            return ChatResponse(reply=summary_text)
+
+        # اگر prompt وجود دارد، context را با نتایج جستجو ترکیب می‌کنیم
+        combined_prompt = (
+            "املاک زیر با فیلترهای شما یافت شد:\n"
+            f"{summary_text}\n\n"
+            "حالا به سوال زیر پاسخ بده:\n"
+            f"{req.prompt}"
+        )
+        # فراخوان Agent با متن ترکیبی
+        answer = await run_agent(combined_prompt)
+        return ChatResponse(reply=answer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post(
+    "/api/search",
+    response_model=List[Dict],
+    summary="جستجوی ساختاری مستقیم در MongoDB"
+)
+async def search_endpoint(req: SearchRequest):
+    return search_service.structured_search(
+        neighborhood=req.neighborhood,
+        max_price=req.max_price,
+        min_sqft=req.min_sqft
     )
-    reply_text = raw["output"] if isinstance(raw, dict) else raw
-    return {"reply": reply_text}
 
-@app.post("/api/search", summary="جست‌وجوی ساختاری آگهی‌ها")
-async def search_endpoint(body: SearchRequest) -> List[dict]:
-    listings = search_service.structured_search(
-        neighborhood=body.neighborhood,
-        max_price=body.max_price,
-        min_sqft=body.min_sqft,
-    )
-    return listings
-
-
-@app.get("/api/debug", include_in_schema=False, summary="Debug MongoDB")
-async def debug_mongo():
-    total = listings_collection.count_documents({})
-    sample = listings_collection.find_one()
-    # فقط کلیدها را به عنوان لیست برمی‌گردانیم
-    keys = list(sample.keys()) if sample else []
-    return {"total_docs": total, "sample_keys": keys}
-    
 @app.get("/health", summary="Health-check")
 async def health():
     return {"status": "ok"}
 
-# ---------- سرو فایل‌های استاتیک ----------
-app.mount(
-    "/",  # http://<host>/
-    StaticFiles(directory="static", html=True),
-    name="static",
-)
+
+
+# # main.py
+# import os
+# from typing import Optional, List
+
+# from fastapi import FastAPI
+# from fastapi.middleware.cors import CORSMiddleware
+# from fastapi.staticfiles import StaticFiles
+# from pydantic import BaseModel
+
+# # لایه‌های داخلی
+# from config import listings_collection, vector_store
+# from search_service import SearchService
+# from search_semantic import SemanticSearch
+# from agent_manager import run_agent_with_filters
+
+# # ---------- مقداردهی اصلی اپ ----------
+# app = FastAPI(title="AMLAK Chat API", version="0.1.0")
+
+# # پوشه static (برای index.html ساده)
+# os.makedirs("static", exist_ok=True)
+
+# # لایه معنایی و سرویس جست‌وجو
+# semantic_layer = SemanticSearch(vector_store)
+# search_service = SearchService(listings_collection, vector_store, semantic_layer)
+
+# # CORS برای فرانت
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# # ---------- مدل‌های ورودی/خروجی ----------
+# class ChatRequest(BaseModel):
+#     prompt: Optional[str] = None
+#     neighborhood: Optional[str] = None
+#     max_price: Optional[float] = None
+#     min_sqft: Optional[float] = None
+
+# class ChatResponse(BaseModel):
+#     reply: str
+
+# class SearchRequest(BaseModel):
+#     neighborhood: Optional[str] = None
+#     max_price: Optional[float] = None
+#     min_sqft: Optional[float] = None
+
+# # ---------- اندپوینت‌ها ----------
+# @app.post("/api/chat", response_model=ChatResponse)
+# async def chat_endpoint(body: ChatRequest):
+#     raw = await run_agent_with_filters(
+#         neighborhood=body.neighborhood,
+#         max_price=body.max_price,
+#         min_sqft=body.min_sqft,
+#         text=body.prompt,
+#     )
+#     reply_text = raw["output"] if isinstance(raw, dict) else raw
+#     return {"reply": reply_text}
+
+# @app.post("/api/search", summary="جست‌وجوی ساختاری آگهی‌ها")
+# async def search_endpoint(body: SearchRequest) -> List[dict]:
+#     listings = search_service.structured_search(
+#         neighborhood=body.neighborhood,
+#         max_price=body.max_price,
+#         min_sqft=body.min_sqft,
+#     )
+#     return listings
+
+
+# @app.get("/api/debug", include_in_schema=False, summary="Debug MongoDB")
+# async def debug_mongo():
+#     total = listings_collection.count_documents({})
+#     sample = listings_collection.find_one()
+#     # فقط کلیدها را به عنوان لیست برمی‌گردانیم
+#     keys = list(sample.keys()) if sample else []
+#     return {"total_docs": total, "sample_keys": keys}
+    
+# @app.get("/health", summary="Health-check")
+# async def health():
+#     return {"status": "ok"}
+
+# # ---------- سرو فایل‌های استاتیک ----------
+# app.mount(
+#     "/",  # http://<host>/
+#     StaticFiles(directory="static", html=True),
+#     name="static",
+# )
 
 
 
