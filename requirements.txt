@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+sqlalchemy
+pymysql
+pinecone-client
+openai
+langchain
+pandas
+
+tiktoken

@@ -1,0 +1,181 @@
+
+
+# ─── main.py ────────────────────────────────────────────────────────────────
+from typing import Optional, List
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+# لایه‌های داخلی
+from config import Session, vector_store
+from search_service import SearchService
+from agent_manager import run_agent, run_agent_with_filters
+
+# ─────────────────── مقداردهی سراسری ───────────────────────────────────────
+app = FastAPI(title="AMLAK Chat API", version="0.1.0")
+
+search_service = SearchService(Session, vector_store)   # فقط یک‌بار
+
+# (اختیاری) اگر از دامنه/پورت متفاوت برای کلاینت استفاده می‌کنی
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ─────────────────── مدل‌های ورودی ──────────────────────────────────────────
+class ChatRequest(BaseModel):
+    prompt: str
+    neighborhood: Optional[str] = None
+    max_price:   Optional[float] = None
+    min_sqft:    Optional[float] = None
+
+class SearchRequest(BaseModel):
+    neighborhood: Optional[str] = None
+    max_price:   Optional[float] = None
+    min_sqft:    Optional[float] = None
+
+# ─────────────────────── روت‌های API ────────────────────────────────────────
+@app.post("/api/chat", summary="پرسش به LLM با فیلترهای اختیاری")
+async def chat_endpoint(body: ChatRequest):
+    reply: str = run_agent_with_filters(
+        neighborhood = body.neighborhood,
+        max_price    = body.max_price,
+        min_sqft     = body.min_sqft,
+        text         = body.prompt,
+    )
+    return {"reply": reply}
+
+@app.post("/api/search", summary="جست‌وجوی ساختاری آگهی‌ها")
+async def search_endpoint(body: SearchRequest) -> List[dict]:
+    listings = search_service.structured_search(
+        neighborhood = body.neighborhood,
+        max_price    = body.max_price,
+        min_sqft     = body.min_sqft,
+    )
+    return listings
+
+@app.get("/health", summary="Health-check")
+async def health():
+    return {"status": "ok"}
+
+# ───────────── سرو کردن فایل index.html در ریشهٔ سایت ───────────────────────
+app.mount(
+    "/",                                   # http://localhost:8000/
+    StaticFiles(directory="static", html=True),
+    name="static",
+)
+
+# اجرا:  uvicorn main:app --reload --port 8000
+
+
+
+
+
+# # ─── main.py ────────────────────────────────────────────────────────────────
+# from fastapi import FastAPI
+# from pydantic import BaseModel
+# from typing import Optional
+
+# from agent_manager import run_agent_with_filters   # توابع آماده
+
+# app = FastAPI(
+#     title="ShishDong Real-Estate Chat API",
+#     version="0.1.0",
+# )
+
+# # ──────────────────── مدل ورودی ─────────────────────────────────────────────
+# class Query(BaseModel):
+#     city: str
+#     max_price: Optional[float] = None
+#     min_area: Optional[float] = None
+#     text:     Optional[str]   = None
+
+# # ──────────────────── مسیردهی ───────────────────────────────────────────────
+# @app.post("/chat/", summary="گفت‌وگو با چت‌بات املاک")
+# async def chat(q: Query):
+#     """
+#     نقطهٔ ورودی اصلی برای کلاینت وب.
+#     - در صورت وجود `text` از آن به عنوان پرسش کاربر استفاده می‌شود.
+#     - در غیر این صورت فیلترها (city, max_price, min_area) به‌شکل JSON
+#       به Agent پاس داده می‌شود تا خودش بهترین جواب را برگرداند.
+#     """
+#     response = run_agent_with_filters(
+#         city       = q.city,
+#         max_price  = q.max_price,
+#         min_area   = q.min_area,
+#         text       = q.text
+#     )
+#     return {"response": response}
+
+# # اندپوینت سلامت ساده
+# @app.get("/", summary="سلامت سرویس")
+# async def root():
+#     return {"status": "ok"}
+
+# # برای اجرای محلی:
+# # uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+
+
+
+# # ✅ main.py - نسخه بازنویسی شده برای استفاده از config.py
+
+# from fastapi import FastAPI
+# from pydantic import BaseModel
+# import json
+
+# from config import Session, vector_store, OPENAI_API_KEY
+# from search_service import SearchService
+# from langchain.chat_models import ChatOpenAI
+# from langchain.agents import initialize_agent, AgentType
+# from langchain.tools import Tool
+
+# # ───── راه‌اندازی سرویس جست‌وجو ─────
+# search_service = SearchService(Session, vector_store)
+
+# # ───── راه‌اندازی مدل چت ─────
+# llm = ChatOpenAI(temperature=0, openai_api_key=OPENAI_API_KEY)
+
+# # ───── تعریف ابزارها برای Agent ─────
+# search_tool = Tool(
+#     name='search_listings',
+#     func=search_service.structured_search,
+#     description='جست‌وجوی آگهی‌ها با فیلتر city, max_price, min_area'
+# )
+
+# embed_tool = Tool(
+#     name='semantic_search',
+#     func=search_service.semantic_search,
+#     description='بازیابی متن توضیحات مرتبط از Vector DB'
+# )
+
+# # ───── تعریف Agent با قابلیت Function Calling ─────
+# agent = initialize_agent(
+#     tools=[search_tool, embed_tool],
+#     llm=llm,
+#     agent=AgentType.OPENAI_FUNCTIONS,
+#     verbose=False
+# )
+
+# # ───── تعریف API ─────
+# app = FastAPI()
+
+# class Query(BaseModel):
+#     city: str
+#     max_price: float | None = None
+#     min_area: float | None = None
+#     text: str | None = None
+
+# @app.post('/chat/')
+# def chat(q: Query):
+#     payload = {'city': q.city, 'max_price': q.max_price, 'min_area': q.min_area}
+#     prompt = q.text or json.dumps(payload, ensure_ascii=False)
+#     response = agent.run(prompt)
+#     return {'response': response}
+
+# # برای اجرای سرور:
+# # uvicorn main:app --reload --host 0.0.0.0 --port 8000
