@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ── لایه‌های داخلی --------------------------------------------------------- #
-from config import Session, vector_store
+from config import listings_collection, vector_store
 from search_service import SearchService
 from search_semantic import SemanticSearch
 from agent_manager import run_agent, run_agent_with_filters
@@ -23,7 +23,7 @@ os.makedirs("static", exist_ok=True)
 semantic_layer = SemanticSearch(vector_store)
 
 # ۳) ساخت SearchService با سه آرگومان لازم
-search_service = SearchService(Session, vector_store, semantic_layer)
+search_service = SearchService(listings_collection, vector_store, semantic_layer)
 
 # (اختیاری) اگر از دامنه/پورت متفاوت برای کلاینت استفاده می‌کنی
 app.add_middleware(
