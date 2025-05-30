@@ -1,44 +1,44 @@
 
 
 
-# ─── orm_models.py ───────────────────────────────────────────────────────────
-from sqlalchemy import (
-    Column, Integer, String, Float, Text, Date, MetaData
-)
-from sqlalchemy.orm import declarative_base
-from config import engine  # استفاده از همان Engine پروژه
+# # ─── orm_models.py ───────────────────────────────────────────────────────────
+# from sqlalchemy import (
+#     Column, Integer, String, Float, Text, Date, MetaData
+# )
+# from sqlalchemy.orm import declarative_base
+# from config import engine  # استفاده از همان Engine پروژه
 
-Base     = declarative_base()
-metadata = MetaData()
+# Base     = declarative_base()
+# metadata = MetaData()
 
-class Listing(Base):
-    __tablename__ = "listings"  # چون rename کردی
+# class Listing(Base):
+#     __tablename__ = "listings"  # چون rename کردی
 
-    id                      = Column(Integer, primary_key=True)
-    borough                = Column(Integer)
-    neighborhood           = Column(String(100))
-    building_class_category = Column(String(100))
-    tax_class_present      = Column(String(10))
-    block                  = Column(Integer)
-    lot                    = Column(Integer)
-    easement               = Column(String(10))
-    building_class_present = Column(String(10))
-    address                = Column(String(200))
-    apartment_number       = Column(String(50))
-    zip_code               = Column(String(10))
-    residential_units      = Column(Integer)
-    commercial_units       = Column(Integer)
-    total_units            = Column(Integer)
-    land_square_feet       = Column(Integer)
-    gross_square_feet      = Column(Integer)
-    year_built             = Column(Integer)
-    tax_class_sale         = Column(String(10))
-    building_class_sale    = Column(String(10))
-    sale_price             = Column(Float)
-    sale_date              = Column(String(20))  # یا Date اگر فرمت اصلاح شده
+#     id                      = Column(Integer, primary_key=True)
+#     borough                = Column(Integer)
+#     neighborhood           = Column(String(100))
+#     building_class_category = Column(String(100))
+#     tax_class_present      = Column(String(10))
+#     block                  = Column(Integer)
+#     lot                    = Column(Integer)
+#     easement               = Column(String(10))
+#     building_class_present = Column(String(10))
+#     address                = Column(String(200))
+#     apartment_number       = Column(String(50))
+#     zip_code               = Column(String(10))
+#     residential_units      = Column(Integer)
+#     commercial_units       = Column(Integer)
+#     total_units            = Column(Integer)
+#     land_square_feet       = Column(Integer)
+#     gross_square_feet      = Column(Integer)
+#     year_built             = Column(Integer)
+#     tax_class_sale         = Column(String(10))
+#     building_class_sale    = Column(String(10))
+#     sale_price             = Column(Float)
+#     sale_date              = Column(String(20))  # یا Date اگر فرمت اصلاح شده
 
-    def __repr__(self):
-        return f"<Listing(id={self.id}, address='{self.address}', sale_price={self.sale_price})>"
+#     def __repr__(self):
+#         return f"<Listing(id={self.id}, address='{self.address}', sale_price={self.sale_price})>"
 
 
 
