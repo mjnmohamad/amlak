@@ -1,30 +1,30 @@
-
-
-
-# ─── search_semantic.py ───────────────────────────────────────────────────────
-from langchain.vectorstores import Pinecone as PineconeStore
+from langchain_pinecone import PineconeVectorStore
 
 class SemanticSearch:
     """
-    پرس‌وجوی معنایی روی Pinecone  (Vector-DB).
+    پرس‌وجوی معنایی روی Pinecone (Vector-DB).
     متادیتاهایی که در ingest.py ذخیره می‌کنیم باید دقیقاً همین کلیدها را داشته باشد.
     """
-    def __init__(self, vector_store: PineconeStore):
+    def __init__(self, vector_store: PineconeVectorStore):
         self.vs = vector_store
 
     # --------------------------------------------------------------------- #
-    def search(self,
-               query: str,
-               k: int = 5,
-               filter_dict: dict | None = None) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        k: int = 5,
+        filter_dict: dict | None = None
+    ) -> list[dict]:
         """
         filter_dict می‌تواند هرکدام از فیلدهای متادیتا مثل
         {'borough': 1, 'sale_price': {'$lte': 1_000_000}}
         باشد (سینتکس Pinecone).
         """
-        docs = self.vs.similarity_search(query=query,
-                                         k=k,
-                                         filter=filter_dict or {})
+        docs = self.vs.similarity_search(
+            query=query,
+            k=k,
+            filter=filter_dict or {}
+        )
         results: list[dict] = []
         for d in docs:
             meta = d.metadata or {}
