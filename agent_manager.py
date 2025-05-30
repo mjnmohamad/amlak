@@ -25,7 +25,7 @@ class OpenRouterLangChain(LLM):
     - اگر فراخوان ناهمگام باشد (در FastAPI یا هر رویداد‌محور دیگر)، LangChain
       به‌طور خودکار _acall را صدا می‌زند.
     """
-    model_name: str = MODELS
+    model_name: str = "gpt-4o"
 
     @property
     def _llm_type(self) -> str:
