@@ -1,4 +1,5 @@
 # ─── main.py ────────────────────────────────────────────────────────────────
+import os
 from typing import Optional, List
 
 from fastapi import FastAPI
@@ -6,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# لایه‌های داخلی
+# ── لایه‌های داخلی --------------------------------------------------------- #
 from config import Session, vector_store
 from search_service import SearchService
 from search_semantic import SemanticSearch
@@ -15,10 +16,13 @@ from agent_manager import run_agent, run_agent_with_filters
 # ─────────────────── مقداردهی سراسری ───────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-# ابتدا لایه‌ی معنایی را مقداردهی می‌کنیم
+# ۱) اگر پوشه‌ی static وجود ندارد، بسازیم
+os.makedirs("static", exist_ok=True)
+
+# ۲) مقداردهی Semantic Layer
 semantic_layer = SemanticSearch(vector_store)
 
-# سپس SearchService را با سه پارامترِ موردنیاز می‌سازیم
+# ۳) ساخت SearchService با سه آرگومان لازم
 search_service = SearchService(Session, vector_store, semantic_layer)
 
 # (اختیاری) اگر از دامنه/پورت متفاوت برای کلاینت استفاده می‌کنی
@@ -71,6 +75,7 @@ app.mount(
     StaticFiles(directory="static", html=True),
     name="static",
 )
+
 
 
 # اجرا:  uvicorn main:app --reload --port 8000
