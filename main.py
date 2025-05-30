@@ -5,6 +5,7 @@ from typing import Optional, List, Dict
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # ── لایه‌های داخلی ---------------------------------------------------------
@@ -16,7 +17,7 @@ from agent_manager   import run_agent_with_filters
 # ─────────────────── مقداردهی اپلیکیشن ────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 
-# CORS (در صورت لزوم برای فرانت)
+# CORS (در صورت استفاده از فرانت جدا)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,19 +25,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# سرو کردن فایل‌های static (index.html و بقیه)
+# ── سرو کردن static ───────────────────────────────────────────────────────
 os.makedirs("static", exist_ok=True)
-app.mount(
-    "/", 
-    StaticFiles(directory="static", html=True),
-    name="static",
-)
+# فقط GET/HEAD زیر /static
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ─────────────────── مقداردهی سرویس‌ها ───────────────────────────────────
-semantic_layer  = SemanticSearch(vector_store)
-search_service  = SearchService(listings_collection, vector_store, semantic_layer)
+# فقط GET روی ریشه→ index.html
+@app.get("/", include_in_schema=False)
+async def serve_index():
+    return FileResponse("static/index.html")
 
-# ─────────────────── مدل‌های ورودی/خروجی ───────────────────────────────────
+# ── مقداردهی سرویس‌های دیتابیس و وکتور ────────────────────────────────────
+semantic_layer = SemanticSearch(vector_store)
+search_service = SearchService(listings_collection, vector_store, semantic_layer)
+
+# ── مدل‌های ورودی/خروجی ──────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     prompt:       Optional[str] = Field(None, description="متن پرسش آزاد")
     neighborhood: Optional[str] = Field(None, description="فیلتر محله")
@@ -51,7 +54,7 @@ class SearchRequest(BaseModel):
     max_price:    Optional[float] = None
     min_sqft:     Optional[float] = None
 
-# ─────────────────── اندپوینت‌ها ────────────────────────────────────────────
+# ── اندپوینت‌های API ─────────────────────────────────────────────────────
 @app.post(
     "/api/chat",
     response_model=ChatResponse,
@@ -59,17 +62,14 @@ class SearchRequest(BaseModel):
 )
 async def chat_endpoint(req: ChatRequest):
     try:
-        # اگر prompt نداشتیم، فقط فیلتر ساختاری اجرا می‌شود
-        text = req.prompt or ""
         answer = await run_agent_with_filters(
             neighborhood = req.neighborhood,
             max_price    = req.max_price,
             min_sqft     = req.min_sqft,
-            text         = text,
+            text         = req.prompt or "",
         )
         return ChatResponse(reply=answer)
     except Exception as e:
-        # خطا در مدل یا دیتابیس
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post(
@@ -78,7 +78,6 @@ async def chat_endpoint(req: ChatRequest):
     summary="جستجوی ساختاری مستقیم در MongoDB"
 )
 async def search_endpoint(req: SearchRequest):
-    # فقط جست‌وجوی ساختاری (filter) روی کالکشن شما
     return search_service.structured_search(
         neighborhood = req.neighborhood,
         max_price    = req.max_price,
@@ -88,6 +87,7 @@ async def search_endpoint(req: SearchRequest):
 @app.get("/health", summary="Health-check")
 async def health():
     return {"status": "ok"}
+
 
 
 
