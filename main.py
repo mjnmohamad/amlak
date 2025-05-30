@@ -57,11 +57,6 @@ class SearchRequest(BaseModel):
     response_model=ChatResponse,
     summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس و Follow-up)"
 )
-@app.post(
-    "/api/chat",
-    response_model=ChatResponse,
-    summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس و Follow-up)"
-)
 async def chat_endpoint(req: ChatRequest):
     try:
         # 1) جستجوی ساختاری با فیلترها
@@ -82,68 +77,58 @@ async def chat_endpoint(req: ChatRequest):
                 summary_lines.append(
                     f"{addr} in {neigh} for ${price} ({sqft} sqft)"
                 )
-            summary_text = "
-".join(summary_lines)
+            summary_text = "\n".join(summary_lines)
         else:
             summary_text = "هیچ ملکی مطابق فیلترها یافت نشد."
 
-        # اگر فقط فیلترها بدون prompt باشند
+        # 3) اگر فقط فیلتر و بدون prompt باشند
         if not req.prompt:
             return ChatResponse(reply=summary_text)
 
-        # 3) پرسش follow-up ترکیب‌شده
+        # 4) ترکیب فیلترها و سوال کاربر
         combined_text = (
-            "املاک زیر با فیلترهای شما یافت شد:
-"
-            f"{summary_text}
-
-"
+            "املاک زیر با فیلترهای شما یافت شد:\n"
+            f"{summary_text}\n\n"
             "سوال شما: " + req.prompt
         )
 
-        # 4) فراخوانی Agent با فیلترها و متن ترکیبی
+        # 5) فراخوانی Agent با متن ترکیبی و فیلترها
         result = await run_agent_with_filters(
             neighborhood=req.neighborhood,
             max_price=req.max_price,
             min_sqft=req.min_sqft,
             text=combined_text,
         )
-        # 5) استخراج متن خروجی (ممکن است dict باشد)
+        # تبدیل خروجی به رشته
         if isinstance(result, dict):
-            # common keys: 'output', 'reply'
             answer_text = result.get('output') or result.get('reply') or str(result)
         else:
             answer_text = str(result)
 
         return ChatResponse(reply=answer_text)
 
-    except Exception as e:
-        import logging; logging.error(f"Error in chat_endpoint: {e}")
+    except Exception:
         raise HTTPException(status_code=500, detail="خطا در پردازش درخواست چت")
 
-# ───────────────── ادامه بقیه اندپوینت‌ها ────────────────────────────────
 @app.post(
-    "/api/search",
-(
     "/api/search",
     response_model=List[Dict],
     summary="جستجوی ساختاری مستقیم در MongoDB"
 )
 async def search_endpoint(req: SearchRequest):
     try:
-        results = search_service.structured_search(
+        return search_service.structured_search(
             neighborhood=req.neighborhood,
             max_price=req.max_price,
             min_sqft=req.min_sqft
         )
-        return results
-    except Exception as e:
-        import logging; logging.error(f"Error in search_endpoint: {e}")
+    except Exception:
         raise HTTPException(status_code=500, detail="خطا در جستجوی املاک")
 
 @app.get("/health", summary="Health-check")
 async def health():
     return {"status": "ok"}
+
 
 
 
