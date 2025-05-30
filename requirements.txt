@@ -10,8 +10,10 @@ openai
 
 langchain
 langchain-openai
+langchain-community
 
 pandas
 
 tiktoken
+
 
