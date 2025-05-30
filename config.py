@@ -1,13 +1,12 @@
 
 
-
 # ─── config.py ───────────────────────────────────────────────────────────────
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-import pinecone
-from langchain.embeddings import OpenAIEmbeddings
+from pinecone import Pinecone
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import Pinecone as PineconeVectorStore
 
 # ── env -------------------------------------------------------------------- #
@@ -19,7 +18,7 @@ if not DATABASE_URL:
 
 OPENAI_API_KEY        = os.getenv("OPENAI_API_KEY")          # فقط برای Embedding
 PINECONE_API_KEY      = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT  = os.getenv("PINECONE_ENVIRONMENT")
+PINECONE_ENVIRONMENT  = os.getenv("PINECONE_ENVIRONMENT")    # دیگر استفاده نمی‌شود
 PINECONE_INDEX_NAME   = os.getenv("PINECONE_INDEX_NAME") or "listings-index"
 MODEL_TYPE            = os.getenv("MODEL_TYPE", "gpt-4o")    # برای models.Model
 
@@ -35,15 +34,16 @@ def get_db():
         db.close()
 
 # ── Pinecone & LangChain Vector-Store ------------------------------------- #
-pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+pc = Pinecone(api_key=PINECONE_API_KEY)   # اتصال جدید طبق نسخه جدید Pinecone
 
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
 vector_store = PineconeVectorStore.from_existing_index(
     index_name=PINECONE_INDEX_NAME,
     embedding=embeddings,
-    text_key="text",          # همان کلیدی که در ingest.py ذخیره می‌کنیم
+    text_key="text"  # همان کلیدی که در ingest.py ذخیره می‌کنیم
 )
+
 
 
 
