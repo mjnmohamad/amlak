@@ -1,76 +1,47 @@
-import os
-import time
+# config.py
+import os, time
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
+from pymongo import MongoClient
 from pinecone import Pinecone, ServerlessSpec
 from langchain_openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 
-# بارگذاری متغیرهای .env
 load_dotenv()
 
-# ── ENV ───────────────────────────────────────────────────────────────────────
-DATABASE_URL         = os.getenv("DATABASE_URL")
+# ── MongoDB ─────────────────────────────────────────────
+MONGODB_URI   = os.getenv("MONGODB_URI")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "manhatan")
+
+# ── کلیدها ──────────────────────────────────────────────
 OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY     = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
 PINECONE_INDEX_NAME  = os.getenv("PINECONE_INDEX_NAME", "listings-index")
 
-# ── اعتبارسنجی متغیرهای محیطی ────────────────────────────────────────────────
-if not (DATABASE_URL and OPENAI_API_KEY and PINECONE_API_KEY and PINECONE_ENVIRONMENT):
-    raise RuntimeError(
-        "Missing one of DATABASE_URL, OPENAI_API_KEY, PINECONE_API_KEY or PINECONE_ENVIRONMENT"
-    )
+if not (MONGODB_URI and OPENAI_API_KEY and PINECONE_API_KEY and PINECONE_ENVIRONMENT):
+    raise RuntimeError("⛔️ یکی از متغیرهای ضروری در .env تنظیم نشده است")
 
-# ── (اختیاری) لاگ جهت دیباگ ────────────────────────────────────────────────────
-print("🔗 DATABASE_URL:", DATABASE_URL)
-print("🔑 OPENAI_API_KEY set?", bool(OPENAI_API_KEY))
-print("🌲 PINECONE_ENVIRONMENT:", PINECONE_ENVIRONMENT)
+# ── اتصال MongoDB ──────────────────────────────────────
+mongo_client        = MongoClient(MONGODB_URI)
+db                  = mongo_client[MONGO_DB_NAME]
+listings_collection = db["listings"]   # کالکشن اصلی
 
-# ── SQLAlchemy ────────────────────────────────────────────────────────────────
-engine  = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-def get_db():
-    db = Session()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# ── Pinecone Client ───────────────────────────────────────────────────────────
-pc = Pinecone(
-    api_key=     PINECONE_API_KEY,
-    environment= PINECONE_ENVIRONMENT,
-)
-
-# اگر ایندکس وجود نداشت، ایجادش کن
-existing = [info["name"] for info in pc.list_indexes()]
-if PINECONE_INDEX_NAME not in existing:
+# ── Pinecone + VectorStore ─────────────────────────────
+pc = Pinecone(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+if PINECONE_INDEX_NAME not in [i["name"] for i in pc.list_indexes()]:
     pc.create_index(
-        name=      PINECONE_INDEX_NAME,
-        dimension= 1536,           # مطابق embedding dimension شما
-        metric=    "cosine",       # یا "euclidean"
-        spec=      ServerlessSpec(cloud="aws", region="us-east-1"),
+        name      = PINECONE_INDEX_NAME,
+        dimension = 1536,
+        metric    = "cosine",
+        spec      = ServerlessSpec(cloud="aws", region="us-east-1")
     )
-    # صبر کن تا ایندکس آماده بشه
     while not pc.describe_index(PINECONE_INDEX_NAME).status["ready"]:
         time.sleep(1)
 
-# هندل ایندکس
-index = pc.Index(PINECONE_INDEX_NAME)
+index        = pc.Index(PINECONE_INDEX_NAME)
+embeddings   = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+vector_store = PineconeVectorStore(index=index, embedding=embeddings, text_key="text")
 
-# ── Embeddings & VectorStore ─────────────────────────────────────────────────
-embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-
-vector_store = PineconeVectorStore(
-    index=     index,
-    embedding= embeddings,
-    text_key=  "text",      # نام فیلد متادیتای متنی
-    # namespace="default"   # در صورت نیاز مشخص کنید
-)
 
 
 
