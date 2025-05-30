@@ -57,6 +57,11 @@ class SearchRequest(BaseModel):
     response_model=ChatResponse,
     summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس و Follow-up)"
 )
+@app.post(
+    "/api/chat",
+    response_model=ChatResponse,
+    summary="گفتگو با هوش‌مصنوعی (RAG با دیتابیس و Follow-up)"
+)
 async def chat_endpoint(req: ChatRequest):
     try:
         # 1) جستجوی ساختاری با فیلترها
@@ -66,7 +71,7 @@ async def chat_endpoint(req: ChatRequest):
             min_sqft=req.min_sqft,
             limit=10
         )
-        # 2) ساخت خلاصه نتایج با دسترسی امن به کلیدها
+        # 2) ساخت خلاصه نتایج
         if props:
             summary_lines = []
             for p in props:
@@ -77,36 +82,49 @@ async def chat_endpoint(req: ChatRequest):
                 summary_lines.append(
                     f"{addr} in {neigh} for ${price} ({sqft} sqft)"
                 )
-            summary_text = "\n".join(summary_lines)
+            summary_text = "
+".join(summary_lines)
         else:
             summary_text = "هیچ ملکی مطابق فیلترها یافت نشد."
 
-        # 3) اگر فقط فیلترها اعمال شده و بدون prompt باشند
+        # اگر فقط فیلترها بدون prompt باشند
         if not req.prompt:
             return ChatResponse(reply=summary_text)
 
-        # 4) پرسش follow-up ترکیب‌شده
+        # 3) پرسش follow-up ترکیب‌شده
         combined_text = (
-            "املاک زیر با فیلترهای شما یافت شد:\n"
-            f"{summary_text}\n\n"
+            "املاک زیر با فیلترهای شما یافت شد:
+"
+            f"{summary_text}
+
+"
             "سوال شما: " + req.prompt
         )
 
-        # 5) فراخوانی Agent با فیلترها و متن ترکیبی
-        answer = await run_agent_with_filters(
+        # 4) فراخوانی Agent با فیلترها و متن ترکیبی
+        result = await run_agent_with_filters(
             neighborhood=req.neighborhood,
             max_price=req.max_price,
             min_sqft=req.min_sqft,
             text=combined_text,
         )
-        return ChatResponse(reply=answer)
+        # 5) استخراج متن خروجی (ممکن است dict باشد)
+        if isinstance(result, dict):
+            # common keys: 'output', 'reply'
+            answer_text = result.get('output') or result.get('reply') or str(result)
+        else:
+            answer_text = str(result)
+
+        return ChatResponse(reply=answer_text)
 
     except Exception as e:
-        # لاگ خطا
         import logging; logging.error(f"Error in chat_endpoint: {e}")
         raise HTTPException(status_code=500, detail="خطا در پردازش درخواست چت")
 
+# ───────────────── ادامه بقیه اندپوینت‌ها ────────────────────────────────
 @app.post(
+    "/api/search",
+(
     "/api/search",
     response_model=List[Dict],
     summary="جستجوی ساختاری مستقیم در MongoDB"
@@ -126,6 +144,7 @@ async def search_endpoint(req: SearchRequest):
 @app.get("/health", summary="Health-check")
 async def health():
     return {"status": "ok"}
+
 
 
 
