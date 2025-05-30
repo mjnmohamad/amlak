@@ -1,27 +1,23 @@
-
 from search_structured import StructuredSearch
-from search_semantic import SemanticSearch
+from search_semantic   import SemanticSearch
 
 class SearchService:
-    def __init__(self, Session, vector_store):
-        self.structured = StructuredSearch(Session)
-        self.semantic = SemanticSearch(vector_store)
+    def __init__(self, Session, vector_store, semantic_layer):
+        # StructuredSearch به Session نیاز داره
+        self.structured    = StructuredSearch(Session)
+        # خودِ vector_store (مثلاً Faiss, Pinecone, Chroma، …)
+        self.vector_store  = vector_store
+        # و لایه‌ی آماده‌ی SemanticSearch
+        self.sem           = semantic_layer
 
-
-    # ─── search_service.py (فقط همین خط) ───────────────────────────────────────
     def structured_search(self, neighborhood=None, max_price=None, min_sqft=None):
         return self.structured.search(neighborhood, max_price, min_sqft)
 
-
-
-    # def structured_search(self, city, max_price=None, min_area=None):
-    #     return self.structured.search(city, max_price, min_area)
-
     def semantic_search(self, query: str, k: int = 5, **filters):
-        """
-        اگر فیلترهایی مثل city یا price داشتیم اینجا به semantic_search پاس دهیم.
-        """
-        return self.semantic.search(query, k, filter_dict=filters or None)
+        # اگر نیاز بود مستقیماً از vector_store چیزی بخونید،
+        # الان self.vector_store در دسترس‌تون هست.
+        return self.sem.search(query, k, filter_dict=filters or None)
+
     
     
     # def semantic_search(self, query, k=5):
