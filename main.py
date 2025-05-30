@@ -8,10 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ── لایه‌های داخلی --------------------------------------------------------- #
-from config import listings_collection, vector_store
-from search_service import SearchService
+from config          import listings_collection, vector_store
+from search_service  import SearchService
 from search_semantic import SemanticSearch
-from agent_manager import run_agent, run_agent_with_filters
+from agent_manager   import run_agent_with_filters
 
 # ─────────────────── مقداردهی سراسری ───────────────────────────────────────
 app = FastAPI(title="AMLAK Chat API", version="0.1.0")
@@ -20,12 +20,12 @@ app = FastAPI(title="AMLAK Chat API", version="0.1.0")
 os.makedirs("static", exist_ok=True)
 
 # ۲) مقداردهی Semantic Layer
-semantic_layer = SemanticSearch(vector_store)
+semantic_layer  = SemanticSearch(vector_store)
 
-# ۳) ساخت SearchService با سه آرگومان لازم
-search_service = SearchService(listings_collection, vector_store, semantic_layer)
+# ۳) ساخت SearchService
+search_service  = SearchService(listings_collection, vector_store, semantic_layer)
 
-# (اختیاری) اگر از دامنه/پورت متفاوت برای کلاینت استفاده می‌کنی
+# (اختیاری) CORS برای فرانت
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,20 +33,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─────────────────── مدل‌های ورودی ──────────────────────────────────────────
+# ─────────────────── مدل‌های ورودی/خروجی ───────────────────────────────────
 class ChatRequest(BaseModel):
-    prompt: str
+    prompt:       Optional[str] = None
     neighborhood: Optional[str] = None
-    max_price:   Optional[float] = None
-    min_sqft:    Optional[float] = None
+    max_price:    Optional[float] = None
+    min_sqft:     Optional[float] = None
+
+class ChatResponse(BaseModel):
+    reply: str
 
 class SearchRequest(BaseModel):
     neighborhood: Optional[str] = None
-    max_price:   Optional[float] = None
-    min_sqft:    Optional[float] = None
+    max_price:    Optional[float] = None
+    min_sqft:     Optional[float] = None
 
-# ----- مسیر اصلی گفت‌وگو ----------------------------------------
-@app.post("/api/chat", response_model=ChatResponse)
+# ─────────────────── اندپوینت‌ها ────────────────────────────────────────────
+@app.post("/api/chat", response_model=ChatResponse, summary="گفت‌وگو با هوش مصنوعی")
 async def chat_endpoint(body: ChatRequest):
     reply_text: str = await run_agent_with_filters(
         neighborhood = body.neighborhood,
@@ -71,10 +74,11 @@ async def health():
 
 # ───────────── سرو کردن فایل index.html در ریشهٔ سایت ───────────────────────
 app.mount(
-    "/",                                   # http://localhost:8000/
+    "/",                                   # http://<host>/
     StaticFiles(directory="static", html=True),
     name="static",
 )
+
 
 
 
