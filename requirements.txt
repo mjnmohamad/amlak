@@ -5,6 +5,8 @@ sqlalchemy
 pymysql
 pinecone
 
+langchain-community
+
 openai
 langchain
 pandas
