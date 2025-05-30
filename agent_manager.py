@@ -1,71 +1,101 @@
+# agent_manager.py
+# ────────────────────────────────────────────────────────────────────────────
 from __future__ import annotations
 import json, asyncio
 from typing import Optional, Any
 
-from config import listings_collection, vector_store
-from search_service import SearchService
+from config          import listings_collection, vector_store
+from search_service  import SearchService
 from search_semantic import SemanticSearch
-from models import Model, MODELS
+from models          import Model, MODELS
 
 from langchain.llms.base import LLM
-from langchain.agents import initialize_agent, AgentType
-from langchain.tools import Tool
+from langchain.agents    import initialize_agent, AgentType
+from langchain.tools     import Tool
 
-# ── سرویس‌های جست‌وجو ─────────────────────────────────
-semantic_layer = SemanticSearch(vector_store)
-search_service = SearchService(listings_collection, vector_store, semantic_layer)
+# ───────────────── ۱) لایهٔ جست‌وجو ─────────────────────────────────────────
+semantic_layer  = SemanticSearch(vector_store)
+search_service  = SearchService(listings_collection, vector_store, semantic_layer)
 
-# ── رَپِر LLM برای LangChain ──────────────────────────
+# ───────────────── ۲) رَپِر LLM برای LangChain ─────────────────────────────
 class OpenRouterLangChain(LLM):
+    """
+    لایهٔ نازک روی کلاس Model تا با LangChain سازگار شود.
+    - اگر فراخوان همگام باشد (مثلاً در CLI)، متد _call اجرا می‌شود.
+    - اگر فراخوان ناهمگام باشد (در FastAPI یا هر رویداد‌محور دیگر)، LangChain
+      به‌طور خودکار _acall را صدا می‌زند.
+    """
     model_name: str = MODELS
 
     @property
-    def _llm_type(self): return "openrouter"
+    def _llm_type(self) -> str:
+        return "openrouter"
 
-    def _call(self, prompt: str, stop: Optional[list[str]] = None, **kw) -> str:
-        loop = asyncio.new_event_loop()
+    # — مسیر «همگام» (Sync) —-------------------------------------------------
+    def _call(self, prompt: str, stop: Optional[list[str]] = None, **kw: Any) -> str:
+        """
+        فقط زمانی فراخوانی می‌شود که داخل event-loop نباشیم؛ در غیر این صورت
+        باید از نسخهٔ async استفاده شود (agent.ainvoke).
+        """
         try:
-            return loop.run_until_complete(
+            asyncio.get_running_loop()
+            raise RuntimeError(
+                "OpenRouterLangChain._call در حالی صدا زده شد که یک event-loop در حال اجرا است. "
+                "لطفاً از agent.ainvoke یا متدهای async استفاده کنید."
+            )
+        except RuntimeError:  # یعنی هیچ loop فعالی وجود ندارد → مشکلی نیست
+            return asyncio.run(
                 Model(model_type=self.model_name).generate_response(prompt)
             )
-        finally:
-            loop.close()
 
+    # — مسیر «ناهمگام» (Async) —---------------------------------------------
+    async def _acall(self, prompt: str, stop: Optional[list[str]] = None, **kw: Any) -> str:
+        return await Model(model_type=self.model_name).generate_response(prompt)
+
+# نمونهٔ LLM
 llm = OpenRouterLangChain()
 
-# ── ابزارها ───────────────────────────────────────────
+# ───────────────── ۳) تعریف ابزارها ─────────────────────────────────────────
 structured_tool = Tool(
-    name="structured_search",
-    func=search_service.structured_search,
-    description="Structured Mongo search (neighborhood, max_price, min_sqft)"
+    name        = "structured_search",
+    func        = search_service.structured_search,
+    description = "Structured Mongo search (neighborhood, max_price, min_sqft)",
 )
+
 semantic_tool = Tool(
-    name="semantic_search",
-    func=search_service.semantic_search,
-    description="Semantic similarity search"
+    name        = "semantic_search",
+    func        = search_service.semantic_search,
+    description = "Semantic similarity search over listing descriptions",
 )
 
-# ── Agent ────────────────────────────────────────────
+# ───────────────── ۴) ساخت Agent ────────────────────────────────────────────
 agent = initialize_agent(
-    tools=[structured_tool, semantic_tool],
-    llm=llm,
-    agent=AgentType.OPENAI_FUNCTIONS,
-    verbose=False
+    tools  = [structured_tool, semantic_tool],
+    llm    = llm,
+    agent  = AgentType.OPENAI_FUNCTIONS,
+    verbose=False,
 )
 
-# ── توابع کمکی ───────────────────────────────────────
-def run_agent(prompt: str) -> str:
-    return agent.invoke(prompt)
+# ───────────────── ۵) توابع کمکی برای فراخوان Agent ────────────────────────
+async def run_agent(prompt: str) -> str:
+    """فراخوان آزاد Agent به‌صورت ناهمگام"""
+    return await agent.ainvoke(prompt)
 
-def run_agent_with_filters(
-    neighborhood: str | None = None,
+async def run_agent_with_filters(
+    neighborhood: str  | None = None,
     max_price:    float | None = None,
     min_sqft:     float | None = None,
-    text:         str | None = None,
+    text:         str   | None = None,
 ) -> str:
-    payload = {"neighborhood": neighborhood, "max_price": max_price, "min_sqft": min_sqft}
-    prompt  = text or json.dumps(payload, ensure_ascii=False)
-    return agent.invoke(prompt)
+    """فراخوان Agent همراه با فیلترهای ساختاری"""
+    payload = {
+        "neighborhood": neighborhood,
+        "max_price":    max_price,
+        "min_sqft":     min_sqft,
+    }
+    prompt = text or json.dumps(payload, ensure_ascii=False)
+    return await agent.ainvoke(prompt)
+
 
 
 
