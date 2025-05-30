@@ -1,30 +1,28 @@
 
-
-# ─── config.py ───────────────────────────────────────────────────────────────
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from pinecone import Pinecone
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.vectorstores import Pinecone as PineconeVectorStore
 
-# ── env -------------------------------------------------------------------- #
+import pinecone
+from langchain_openai import OpenAIEmbeddings
+from langchain.vectorstores import Pinecone as PineconeVectorStore
+
 load_dotenv()
 
-DATABASE_URL          = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set")
+# ── ENV Vars ───────────────────────────────────────────────────────────────
+DATABASE_URL         = os.getenv("DATABASE_URL")
+OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY     = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+PINECONE_INDEX_NAME  = os.getenv("PINECONE_INDEX_NAME", "listings-index")
 
-OPENAI_API_KEY        = os.getenv("OPENAI_API_KEY")          # فقط برای Embedding
-PINECONE_API_KEY      = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT  = os.getenv("PINECONE_ENVIRONMENT")    # دیگر استفاده نمی‌شود
-PINECONE_INDEX_NAME   = os.getenv("PINECONE_INDEX_NAME") or "listings-index"
-MODEL_TYPE            = os.getenv("MODEL_TYPE", "gpt-4o")    # برای models.Model
+if not DATABASE_URL or not OPENAI_API_KEY or not PINECONE_API_KEY:
+    raise RuntimeError("Missing one of DATABASE_URL, OPENAI_API_KEY or PINECONE_API_KEY")
 
-# ── SQLAlchemy ------------------------------------------------------------- #
-engine   = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
-Session  = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# ── SQLAlchemy ──────────────────────────────────────────────────────────────
+engine  = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 def get_db():
     db = Session()
@@ -33,16 +31,26 @@ def get_db():
     finally:
         db.close()
 
-# ── Pinecone & LangChain Vector-Store ------------------------------------- #
-pc = Pinecone(api_key=PINECONE_API_KEY)   # اتصال جدید طبق نسخه جدید Pinecone
+# ── Pinecone + LangChain ────────────────────────────────────────────────────
+pinecone.init(
+    api_key=PINECONE_API_KEY,
+    environment=PINECONE_ENVIRONMENT,
+)
 
+# کلاینت واقعی از ایندکس
+pinecone_index = pinecone.Index(PINECONE_INDEX_NAME)
+
+# Embeddings
 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
+# ساخت VectorStore
 vector_store = PineconeVectorStore.from_existing_index(
-    index_name=PINECONE_INDEX_NAME,
-    embedding=embeddings,
-    text_key="text"  # همان کلیدی که در ingest.py ذخیره می‌کنیم
+    pinecone_index,
+    embeddings,
+    text_key="text",
+    # namespace="default",   # اگر لازم داری
 )
+
 
 
 
