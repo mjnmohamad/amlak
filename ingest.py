@@ -1,123 +1,94 @@
-
-
-# # فایل: ingest.py
-
-
-
-# ─── ingest.py ────────────────────────────────────────────────────────────────
+# ingest.py
 import os, logging, tiktoken
-from dotenv               import load_dotenv
-from sqlalchemy.orm       import Session
-from pinecone             import Pinecone, ServerlessSpec
-from orm_models           import Listing, SessionLocal
-from embedding_config     import (
-    get_embedding,
-    num_tokens_from_string,
-    EMBEDDING_CTX_LENGTH,
-    EMBEDDING_ENCODING
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from pinecone import Pinecone, ServerlessSpec
+from embedding_config import (
+    get_embedding, num_tokens_from_string,
+    EMBEDDING_CTX_LENGTH, EMBEDDING_ENCODING
 )
 
 load_dotenv()
+
+MONGODB_URI   = os.getenv("MONGODB_URI")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "manhatan")
 
 PINECONE_API_KEY   = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
 PINECONE_INDEX_NAME  = os.getenv("PINECONE_INDEX_NAME")
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level   = logging.INFO,
-    format  = "%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-if not all([PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME]):
-    raise ValueError("Pinecone credentials / index name not found in .env")
+# ── MongoDB ────────────────────────────────────────────
+mongo = MongoClient(MONGODB_URI)
+col   = mongo[MONGO_DB_NAME]["listings"]
 
-pc = Pinecone(api_key=PINECONE_API_KEY)
+# ── Pinecone ───────────────────────────────────────────
+pc = Pinecone(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
 
-# ──────────────────────────────────────────────────────────────────────────────
-def ingest_data() -> None:
-    """
-    واکشی آگهی‌ها از دیتابیس، تولید embedding و آپسِرت در Pinecone.
-    در متادیتا دو کلید «id» و «text» اضافه شده تا در LangChain   page_content
-    و بازیابی معنایی بدون مشکل باشد.
-    """
-    db: Session = SessionLocal()
-    logger.info(f"Connecting to Pinecone index '{PINECONE_INDEX_NAME}' "
-                f"in env '{PINECONE_ENVIRONMENT}'")
-
-    # ۱) ایجاد ایندکس در صورت نبودن
+def ingest_data():
     if PINECONE_INDEX_NAME not in pc.list_indexes().names:
-        logger.info("Index not found – creating …")
+        logger.info("Creating Pinecone index …")
         pc.create_index(
             name      = PINECONE_INDEX_NAME,
-            dimension = 1536,             # text-embedding-ada-002
+            dimension = 1536,
             metric    = "cosine",
             spec      = ServerlessSpec(cloud="aws", region="us-east-1")
         )
-    else:
-        logger.info("Index already exists")
+    index = pc.Index(PINECONE_INDEX_NAME)
 
-    pinecone_index = pc.Index(PINECONE_INDEX_NAME)
+    listings = list(col.find({}))
+    logger.info(f"Fetched {len(listings)} docs from MongoDB")
 
-    try:
-        listings = db.query(Listing).all()
-        logger.info(f"Fetched {len(listings)} listings from DB")
+    batch, B = [], 100
+    for doc in listings:
+        desc = (doc.get("description") or "").replace("\n", " ")
+        if not desc:
+            logger.warning(f"Skip {doc.get('_id')} (no description)")
+            continue
 
-        batch, BATCH_SZ = [], 100
-        for lst in listings:
-            if not lst.description:
-                logger.warning(f"Skip ID {lst.id} (no description)")
-                continue
+        # برش متن در صورت طولانی بودن
+        tok = num_tokens_from_string(desc, EMBEDDING_ENCODING)
+        if tok > EMBEDDING_CTX_LENGTH:
+            enc  = tiktoken.get_encoding(EMBEDDING_ENCODING)
+            desc = enc.decode(enc.encode(desc)[:EMBEDDING_CTX_LENGTH - 1])
 
-            # ── برش توضیح در صورت طولانی بودن
-            desc = lst.description.replace("\n", " ")
-            tok  = num_tokens_from_string(desc, EMBEDDING_ENCODING)
-            if tok > EMBEDDING_CTX_LENGTH:
-                enc  = tiktoken.get_encoding(EMBEDDING_ENCODING)
-                desc = enc.decode(enc.encode(desc)[:EMBEDDING_CTX_LENGTH - 1])
+        try:
+            vec = get_embedding(desc)
+        except Exception as e:
+            logger.error(f"Embedding failed for {doc.get('_id')}: {e}")
+            continue
 
-            # ── گرفتن بردار
-            try:
-                vec = get_embedding(desc)
-            except Exception as e:
-                logger.error(f"Embedding failed for ID {lst.id}: {e}")
-                continue
+        meta = {
+            "id":        str(doc.get("_id") or doc.get("id")),
+            "text":      desc,
+            "neighborhood": doc.get("neighborhood", ""),
+            "borough":      doc.get("borough", ""),
+            "address":      doc.get("address", ""),
+            "sale_price":   float(doc.get("sale_price") or 0),
+            "gross_square_feet": float(doc.get("gross_square_feet") or 0),
+            "year_built":  doc.get("year_built"),
+            "original_description_snippet": desc[:200] + "…"
+        }
+        meta = {k: v for k, v in meta.items() if v not in ("", None)}
 
-            # ── متادیتا (id و text اضافه شد)
-            meta = {
-                "id":   str(lst.id),                 # برای بازیابی سریع
-                "text": desc,                        # تا   page_content  تهی نشود
-                "title": lst.title or "",
-                "city":  lst.city  or "",
-                "zone":  lst.zone  or "",
-                "price": float(lst.price) if lst.price is not None else 0.0,
-                "area":  float(lst.area)  if lst.area  is not None else 0.0,
-                "rooms": int(lst.rooms)  if lst.rooms is not None else 0,
-                "original_description_snippet": desc[:200] + "…"
-            }
-            # حذف کلیدهای تهی
-            meta = {k: v for k, v in meta.items() if v not in ("", None)}
+        batch.append({"id": meta["id"], "values": vec, "metadata": meta})
 
-            batch.append({"id": str(lst.id), "values": vec, "metadata": meta})
+        if len(batch) >= B:
+            index.upsert(vectors=batch)
+            logger.info(f"Upserted {len(batch)} vectors")
+            batch = []
 
-            if len(batch) >= BATCH_SZ:
-                pinecone_index.upsert(vectors=batch)
-                logger.info(f"Upserted {len(batch)} vectors")
-                batch = []
+    if batch:
+        index.upsert(vectors=batch)
+        logger.info(f"Upserted remaining {len(batch)} vectors")
 
-        if batch:
-            pinecone_index.upsert(vectors=batch)
-            logger.info(f"Upserted remaining {len(batch)} vectors")
-
-        logger.info("Ingestion completed successfully")
-        logger.info(f"Index stats: {pinecone_index.describe_index_stats()}")
-
-    finally:
-        db.close()
-        logger.info("DB session closed")
+    logger.info("✅ Ingestion finished.")
 
 if __name__ == "__main__":
     ingest_data()
+
 
 
 
