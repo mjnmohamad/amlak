@@ -14,8 +14,8 @@ from typing import Optional
 from config import Session, vector_store, MODEL_TYPE
 from search_service  import SearchService
 from search_semantic import SemanticSearch
-from models          import Model as ORModel
-
+# from models          import Model as ORModel
+from models import Model, MODELS
 # ── LangChain ----------------------------------------------------------------
 from langchain.llms.base import LLM
 from langchain.agents    import initialize_agent, AgentType
@@ -27,7 +27,7 @@ search_service  = SearchService(Session, vector_store, semantic_layer)
 
 # ───────────────── ۲) رَپِر LLM برای LangChain ──────────────────────────────
 class OpenRouterLangChain(LLM):
-    model_name: str = MODEL_TYPE
+    model_name: str = MODELS
 
     @property
     def _llm_type(self) -> str:            # الزام LangChain
@@ -38,7 +38,7 @@ class OpenRouterLangChain(LLM):
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(
-                ORModel(model_type=self.model_name).generate_response(prompt)
+                Model(model_type=self.model_name).generate_response(prompt)
             )
         finally:
             loop.close()
