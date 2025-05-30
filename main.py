@@ -45,16 +45,16 @@ class SearchRequest(BaseModel):
     max_price:   Optional[float] = None
     min_sqft:    Optional[float] = None
 
-# ─────────────────────── روت‌های API ────────────────────────────────────────
-@app.post("/api/chat", summary="پرسش به LLM با فیلترهای اختیاری")
+# ----- مسیر اصلی گفت‌وگو ----------------------------------------
+@app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(body: ChatRequest):
-    reply: str = run_agent_with_filters(
+    reply_text: str = await run_agent_with_filters(
         neighborhood = body.neighborhood,
         max_price    = body.max_price,
         min_sqft     = body.min_sqft,
         text         = body.prompt,
     )
-    return {"reply": reply}
+    return {"reply": reply_text}
 
 @app.post("/api/search", summary="جست‌وجوی ساختاری آگهی‌ها")
 async def search_endpoint(body: SearchRequest) -> List[dict]:
